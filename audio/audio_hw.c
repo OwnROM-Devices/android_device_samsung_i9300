@@ -365,7 +365,7 @@ static int start_call(struct m0_audio_device *adev)
     } else {
        pcm_config_vx.rate = adev->wb_amr ? VX_WB_SAMPLING_RATE : VX_NB_SAMPLING_RATE;
     }
-
+    ALOGE("Starting call with WB_AMR=%d", adev->wb_amr);
     /* Open modem PCM channels */
     if (adev->pcm_modem_dl == NULL) {
         ALOGD("Opening PCM modem DL stream");
@@ -480,7 +480,7 @@ void audio_set_wb_amr_callback(void *data, int enable)
     pthread_mutex_lock(&adev->lock);
     if (adev->wb_amr != enable) {
         adev->wb_amr = enable;
-
+        ALOGE("WB_ARM status changed to %d", enable);
         /* reopen the modem PCMs at the new rate */
         if (adev->in_call) {
             end_call(adev);
@@ -693,9 +693,6 @@ static void select_output_device(struct m0_audio_device *adev)
             ALOGD("%s: set voicecall route: bt_disable", __func__);
             set_bigroute_by_array(adev->mixer, bt_disable, 1);
         }
-        // this is needed to mute the current device when output devices are switched, but mute is set
-        adev->hw_device.set_mic_mute(&adev->hw_device, adev->mic_mute);
-
         set_incall_device(adev);
     }
 }
@@ -771,7 +768,7 @@ static int start_output_stream_low_latency(struct m0_stream_out *out)
     if (success) {
         out->buffer_frames = pcm_config_tones.period_size * 2;
         if (out->buffer == NULL)
-            out->buffer = malloc(out->buffer_frames * audio_stream_frame_size(&out->stream.common));
+            out->buffer = malloc(out->buffer_frames * audio_stream_out_frame_size(&out->stream.common));
 
         if (adev->echo_reference != NULL)
             out->echo_reference = adev->echo_reference;
@@ -971,7 +968,7 @@ static size_t out_get_buffer_size_low_latency(const struct audio_stream *stream)
     from pcm_config_tones.rate. */
     size_t size = (SHORT_PERIOD_SIZE * DEFAULT_OUT_SAMPLING_RATE) / pcm_config_tones.rate;
     size = ((size + 15) / 16) * 16;
-    return size * audio_stream_frame_size((struct audio_stream *)stream);
+    return size * audio_stream_out_frame_size((struct audio_stream *)stream);
 }
 
 static size_t out_get_buffer_size_deep_buffer(const struct audio_stream *stream)
@@ -985,7 +982,7 @@ static size_t out_get_buffer_size_deep_buffer(const struct audio_stream *stream)
     size_t size = (DEEP_BUFFER_SHORT_PERIOD_SIZE * DEFAULT_OUT_SAMPLING_RATE) /
                         pcm_config_mm.rate;
     size = ((size + 15) / 16) * 16;
-    return size * audio_stream_frame_size((struct audio_stream *)stream);
+    return size * audio_stream_out_frame_size((struct audio_stream *)stream);
 }
 
 static audio_channel_mask_t out_get_channels(const struct audio_stream *stream)
@@ -1209,7 +1206,7 @@ static ssize_t out_write_low_latency(struct audio_stream_out *stream, const void
     int ret;
     struct m0_stream_out *out = (struct m0_stream_out *)stream;
     struct m0_audio_device *adev = out->dev;
-    size_t frame_size = audio_stream_frame_size(&out->stream.common);
+    size_t frame_size = audio_stream_out_frame_size(&out->stream.common);
     size_t in_frames = bytes / frame_size;
     size_t out_frames = in_frames;
     bool force_input_standby = false;
@@ -1277,7 +1274,7 @@ exit:
     pthread_mutex_unlock(&out->lock);
 
     if (ret != 0) {
-        usleep(bytes * 1000000 / audio_stream_frame_size(&stream->common) /
+        usleep(bytes * 1000000 / audio_stream_out_frame_size(&stream->common) /
                out_get_sample_rate(&stream->common));
     }
 
@@ -1301,7 +1298,7 @@ static ssize_t out_write_deep_buffer(struct audio_stream_out *stream, const void
     int ret;
     struct m0_stream_out *out = (struct m0_stream_out *)stream;
     struct m0_audio_device *adev = out->dev;
-    size_t frame_size = audio_stream_frame_size(&out->stream.common);
+    size_t frame_size = audio_stream_out_frame_size(&out->stream.common);
     size_t in_frames = bytes / frame_size;
     size_t out_frames;
     bool use_long_periods;
@@ -1380,7 +1377,7 @@ exit:
     pthread_mutex_unlock(&out->lock);
 
     if (ret != 0) {
-        usleep(bytes * 1000000 / audio_stream_frame_size(&stream->common) /
+        usleep(bytes * 1000000 / audio_stream_out_frame_size(&stream->common) /
                out_get_sample_rate(&stream->common));
     }
 
@@ -1992,7 +1989,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
     int ret = 0;
     struct m0_stream_in *in = (struct m0_stream_in *)stream;
     struct m0_audio_device *adev = in->dev;
-    size_t frames_rq = bytes / audio_stream_frame_size(&stream->common);
+    size_t frames_rq = bytes / audio_stream_in_frame_size(&stream->common);
 
     /* acquiring hw device mutex systematically is useful if a low priority thread is waiting
      * on the input stream mutex - e.g. executing select_mode() while holding the hw device
@@ -2025,7 +2022,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
 
 exit:
     if (ret < 0)
-        usleep(bytes * 1000000 / audio_stream_frame_size(&stream->common) /
+        usleep(bytes * 1000000 / audio_stream_in_frame_size(&stream->common) /
                in_get_sample_rate(&stream->common));
 
     pthread_mutex_unlock(&in->lock);
@@ -2606,51 +2603,12 @@ static int adev_set_mode(struct audio_hw_device *dev, audio_mode_t mode)
 
 static int adev_set_mic_mute(struct audio_hw_device *dev, bool state)
 {
-    int headset_on;
-    int headphone_on;
-    int speaker_on;
-    int earpiece_on;
-    int bt_on; 
-
     struct m0_audio_device *adev = (struct m0_audio_device *)dev;
 
-    headset_on = adev->out_device & AUDIO_DEVICE_OUT_WIRED_HEADSET;
-    headphone_on = adev->out_device & AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
-    speaker_on = adev->out_device & AUDIO_DEVICE_OUT_SPEAKER;
-    earpiece_on = adev->out_device & AUDIO_DEVICE_OUT_EARPIECE;
-    bt_on = adev->out_device & AUDIO_DEVICE_OUT_ALL_SCO;
+    if (adev->mode == AUDIO_MODE_IN_CALL)
+            ril_set_mic_mute(&adev->ril, state);
 
     adev->mic_mute = state;
-
-    if (adev->mode == AUDIO_MODE_IN_CALL) {
-        if (state) {
-            if (speaker_on || earpiece_on || headphone_on) {            
-                ALOGD("%s: set voicecall route: default_input_disable", __func__);
-                set_bigroute_by_array(adev->mixer, default_input_disable, 1);
-            }
-            if (headset_on) {               
-                ALOGD("%s: set voicecall route: headset_input_disable", __func__);
-                set_bigroute_by_array(adev->mixer, headset_input_disable, 1);
-            }
-            if (bt_on) {
-                ALOGD("%s: set voicecall route: bt_input_disable", __func__);
-                set_bigroute_by_array(adev->mixer, bt_input_disable, 1);
-            }
-        } else {
-            if (speaker_on || earpiece_on || headphone_on) {
-                ALOGD("%s: set voicecall route: default_input", __func__);
-                set_bigroute_by_array(adev->mixer, default_input, 1);
-            }
-            if (headset_on) {
-                ALOGD("%s: set voicecall route: headset_input", __func__);
-                set_bigroute_by_array(adev->mixer, headset_input, 1);
-            }
-            if (bt_on) {
-                ALOGD("%s: set voicecall route: bt_input", __func__);
-                set_bigroute_by_array(adev->mixer, bt_input, 1);
-            }
-        }
-    }
 
     return 0;
 }

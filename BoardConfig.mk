@@ -22,7 +22,6 @@
 # RIL
 BOARD_PROVIDES_LIBRIL := true
 BOARD_MODEM_TYPE := xmm6262
-BOARD_RIL_CLASS := ../../../hardware/samsung/ril
 
 # Bluetooth
 BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := device/samsung/i9300/bluetooth
@@ -36,26 +35,39 @@ TARGET_RECOVERY_FSTAB := device/samsung/i9300/rootdir/fstab.smdk4x12
 RECOVERY_FSTAB_VERSION := 2
 
 # Selinux
-#BOARD_SEPOLICY_DIRS += \
-#    device/samsung/i9300/selinux
+BOARD_SEPOLICY_DIRS += \
+    device/samsung/i9300/selinux
 
-#BOARD_SEPOLICY_UNION += \
-#    device.te \
-#    domain.te \
-#    file.te \
-#    file_contexts \
-#    init.te \
-#    mediaserver.te \
-#    rild.te \
-#    system.te \
-#    ueventd.te \
-#    wpa_supplicant.te
+BOARD_SEPOLICY_UNION += \
+    bluetooth.te \
+    device.te \
+    domain.te \
+    file.te \
+    file_contexts \
+    gpsd.te \
+    init.te \
+    mediaserver.te \
+    netd.te \
+    nfc.te \
+    rild.te \
+    servicemanager.te \
+    service_contexts \
+    surfaceflinger.te \
+    sysinit.te \
+    system_app.te \
+    system_server.te \
+    ueventd.te \
+    vold.te \
+    wpa_supplicant.te
 
 # assert
 TARGET_OTA_ASSERT_DEVICE := m0,i9300,GT-I9300
 
 # own headers
 TARGET_SPECIFIC_HEADER_PATH := device/samsung/i9300/include
+
+# TWRP
+DEVICE_RESOLUTION := 720x1280
 
 # inherit from the proprietary version
 -include vendor/samsung/i9300/BoardConfigVendor.mk
